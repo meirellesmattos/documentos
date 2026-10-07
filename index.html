@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Documentos</title>
+  <style>
+    /* ===== Configuração visual (pode alterar as cores) ===== */
+    :root { --barra: #1a4d8f; --fundo: #e9ecef; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--fundo); font-family: Arial, sans-serif; }
+    #barra {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; gap: 12px;
+      background: var(--barra); color: #fff; padding: 10px 14px;
+    }
+    #barra a { color: #fff; text-decoration: none; font-weight: bold; white-space: nowrap; }
+    #titulo { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95rem; }
+    #paginas { max-width: 1000px; margin: 0 auto; padding: 10px; }
+    .pagina { position: relative; margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+    .pagina canvas { display: block; width: 100%; height: auto; }
+    .pagina a.link { position: absolute; display: block; }
+    .pagina a.link:hover { background: rgba(26,77,143,.12); }
+    #aviso { text-align: center; padding: 40px 16px; color: #444; }
+  </style>
+</head>
+<body>
+  <div id="barra">
+    <a id="inicio" href="./">&#8962; Início</a>
+    <span id="titulo"></span>
+  </div>
+  <div id="aviso">Carregando…</div>
+  <div id="paginas"></div>
+
+  <script type="module">
+    // ===== Nome do PDF que abre primeiro (o menu) =====
+    const PDF_INICIAL = "pdfs/menu.pdf";
+
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs";
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+
+    const aviso = document.getElementById("aviso");
+    const area = document.getElementById("paginas");
+    const params = new URLSearchParams(location.search);
+    const pedido = params.get("pdf") || PDF_INICIAL;
+
+    // Só abre PDFs deste próprio site
+    const urlPdf = new URL(pedido, location.href);
+    if (urlPdf.origin !== location.origin) {
+      aviso.textContent = "Endereço de PDF inválido.";
+      throw new Error("origem diferente");
+    }
+    const ehMenu = !params.get("pdf");
+    if (ehMenu) document.getElementById("inicio").style.display = "none";
+    document.getElementById("titulo").textContent =
+      decodeURIComponent(urlPdf.pathname.split("/").pop());
+
+    // Converte um link de dentro do PDF no endereço certo deste visualizador
+    function destinoDoLink(bruto) {
+      let u;
+      try { u = new URL(bruto, urlPdf.href); } catch { return null; }
+      if (u.origin === location.origin && /\.pdf$/i.test(u.pathname)) {
+        const base = new URL("./", location.href).pathname;
+        const rel = u.pathname.startsWith(base) ? u.pathname.slice(base.length) : u.pathname;
+        return { href: "./?pdf=" + encodeURIComponent(decodeURIComponent(rel)), externo: false };
+      }
+      return { href: u.href, externo: u.origin !== location.origin };
+    }
+
+    let doc, larguraAnterior = 0, geracao = 0;
+
+    async function irParaDestino(dest) {
+      if (typeof dest === "string") dest = await doc.getDestination(dest);
+      if (!dest) return;
+      const indice = await doc.getPageIndex(dest[0]);
+      area.children[indice]?.scrollIntoView({ behavior: "smooth" });
+    }
+
+    async function desenhar() {
+      const largura = area.clientWidth - 20;
+      if (Math.abs(largura - larguraAnterior) < 2) return;
+      larguraAnterior = largura;
+      const minha = ++geracao;
+      area.innerHTML = "";
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+
+      for (let n = 1; n <= doc.numPages; n++) {
+        if (minha !== geracao) return;
+        const pagina = await doc.getPage(n);
+        const base = pagina.getViewport({ scale: 1 });
+        const escala = largura / base.width;
+        const vp = pagina.getViewport({ scale: escala * dpr });
+
+        const caixa = document.createElement("div");
+        caixa.className = "pagina";
+        caixa.style.width = largura + "px";
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.floor(vp.width);
+        canvas.height = Math.floor(vp.height);
+        caixa.appendChild(canvas);
+        area.appendChild(caixa);
+        await pagina.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+
+        // Links clicáveis por cima da página
+        const anotacoes = await pagina.getAnnotations();
+        for (const a of anotacoes) {
+          if (a.subtype !== "Link") continue;
+          const [x1, y1, x2, y2] = vp.convertToViewportRectangle(a.rect);
+          const el = document.createElement("a");
+          el.className = "link";
+          el.style.left = (Math.min(x1, x2) / vp.width * 100) + "%";
+          el.style.top = (Math.min(y1, y2) / vp.height * 100) + "%";
+          el.style.width = (Math.abs(x2 - x1) / vp.width * 100) + "%";
+          el.style.height = (Math.abs(y2 - y1) / vp.height * 100) + "%";
+          const bruto = a.url || a.unsafeUrl;
+          if (bruto) {
+            const d = destinoDoLink(bruto);
+            if (!d) continue;
+            el.href = d.href;
+            if (d.externo) { el.target = "_blank"; el.rel = "noopener"; }
+          } else if (a.dest) {
+            el.href = "#";
+            el.addEventListener("click", e => { e.preventDefault(); irParaDestino(a.dest); });
+          } else continue;
+          caixa.appendChild(el);
+        }
+      }
+    }
+
+    try {
+      doc = await pdfjsLib.getDocument(urlPdf.href).promise;
+      aviso.remove();
+      await desenhar();
+      let t;
+      addEventListener("resize", () => { clearTimeout(t); t = setTimeout(desenhar, 300); });
+    } catch (e) {
+      aviso.textContent = "Não foi possível abrir o PDF. Confira o nome do arquivo.";
+      console.error(e);
+    }
+  </script>
+</body>
+</html>

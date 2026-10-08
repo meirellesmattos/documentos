@@ -30,15 +30,30 @@
     <span id="titulo"></span>
   </div>
   <div id="aviso">Carregando…</div>
+  <script>
+    // Plano B para navegadores antigos: se o visualizador não carregar em 12 s,
+    // mostra um link para abrir o PDF direto (o Safari do iPhone abre PDF sozinho).
+    setTimeout(function () {
+      var aviso = document.getElementById("aviso");
+      if (aviso && aviso.textContent === "Carregando…") window.mostrarPlanoB();
+    }, 12000);
+    window.mostrarPlanoB = function () {
+      var p = new URLSearchParams(location.search).get("pdf") || "pdfs/menu.pdf";
+      var aviso = document.getElementById("aviso");
+      if (!aviso) return;
+      aviso.innerHTML = 'Não foi possível exibir o PDF aqui.<br><br>' +
+        '<a href="' + encodeURI(p) + '" style="font-weight:bold">Toque aqui para abrir o PDF</a>';
+    };
+  </script>
   <div id="paginas"></div>
 
   <script type="module">
     // ===== Nome do PDF que abre primeiro (o menu) =====
     const PDF_INICIAL = "pdfs/menu.pdf";
 
-    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs";
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.min.mjs";
     pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.worker.min.mjs";
 
     const aviso = document.getElementById("aviso");
     const area = document.getElementById("paginas");
@@ -135,7 +150,7 @@
       let t;
       addEventListener("resize", () => { clearTimeout(t); t = setTimeout(desenhar, 300); });
     } catch (e) {
-      aviso.textContent = "Não foi possível abrir o PDF. Confira o nome do arquivo.";
+      window.mostrarPlanoB();
       console.error(e);
     }
   </script>
